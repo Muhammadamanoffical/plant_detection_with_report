@@ -1,4 +1,4 @@
-import streamlit as st
+import gradio as gr
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
@@ -8,87 +8,75 @@ import os
 # Load model
 model = YOLO("best.pt")
 
-# Groq API
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+# Groq API Setup
+# Hugging Face mein Settings > Secrets mein GROQ_API_KEY lazmi add karein
+api_key = "use your api key"
+client = Groq(api_key=api_key)
 
-# ✅ Updated function (English + Proper Urdu)
 def get_bilingual_advice(disease):
     prompt = f"""
     You are an expert agriculture specialist.
-
-    Provide advice for the following crop disease:
-    {disease}
-
-    Instructions:
-    1. First give SHORT and practical advice in ENGLISH.
-    2. Then provide its translation in proper URDU (not Roman Urdu).
-    3. Keep it simple and useful for farmers in Pakistan.
+    Provide advice for the following crop disease: {disease}
+    1. Short practical advice in ENGLISH.
+    2. Translation in proper URDU (Unicode).
+    Keep it simple for Pakistani farmers.
     """
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error fetching AI advice: {str(e)}"
 
-    response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt}]
-    )
+def predict_and_advise(img, conf_threshold):
+    if img is None:
+        return None, "Please upload an image first."
 
-    return response.choices[0].message.content
+    # YOLO Prediction
+    results = model(img, conf=conf_threshold)
+    
+    # Plot results on image
+    res_plotted = results[0].plot()
+    output_image = Image.fromarray(res_plotted[:, :, ::-1])  # BGR to RGB conversion
 
-
-# Page config
-st.set_page_config(page_title="AI Agriculture Assistant", page_icon="🌱", layout="centered")
-
-# Header
-st.markdown("<div style='font-family: Noto Nastaliq Urdu;'>...</div>", unsafe_allow_html=True)
-st.markdown("<h1 style='text-align: center; color: green;'>🌱 AI Smart Agriculture Assistant</h1>", unsafe_allow_html=True)
-st.write("Upload a crop image to detect plant disease and get smart AI farming advice.")
-
-# Sidebar
-st.sidebar.title("⚙️ Options")
-confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25)
-
-# Upload image
-uploaded_file = st.file_uploader("📤 Upload Crop Image", type=["jpg", "png", "jpeg"])
-
-if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="📷 Uploaded Image", use_column_width=True)
-
-    # Convert image
-    img_array = np.array(image)
-
-    # Prediction
-    results = model(img_array, conf=confidence)
-
-    # Show output image
-    st.subheader("🔍 Detection Result")
-    result_img = results[0].plot()
-    st.image(result_img, use_column_width=True)
-
-    # Show detected classes
-    st.subheader("📊 Detected Diseases")
+    # Extract detected diseases
     detected = set()
-
     for box in results[0].boxes:
         cls_id = int(box.cls[0])
-        conf = float(box.conf[0])
         label = model.names[cls_id]
         detected.add(label)
 
-        st.write(f"✅ {label} ({conf:.2f})")
-
-    # 🤖 AI Advice (English + Urdu)
-    st.subheader("💡 AI Farming Advice (English + Urdu)")
-
-    if len(detected) == 0:
-        st.success("Plant is healthy.\n\nپودا صحت مند ہے۔ مناسب دیکھ بھال جاری رکھیں۔")
+    # Generate Advice
+    if not detected:
+        full_advice = "✅ Plant is healthy. / پودا صحت مند ہے۔"
     else:
+        advice_list = []
         for d in detected:
-            with st.spinner(f"{d} advice generating..."):
-                advice = get_bilingual_advice(d)
+            advice_list.append(f"### 🌿 Disease: {d}\n{get_bilingual_advice(d)}")
+        full_advice = "\n\n---\n\n".join(advice_list)
 
-                # Better UI display
-                st.markdown(f"### 🌿 {d}")
-                st.markdown(advice)
+    return output_image, full_advice
 
-# Footer
-st.markdown("---")
-st.markdown("👨‍💻 Developed by Muhammad Aman")
+# --- Gradio UI Layout ---
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    gr.Markdown("# 🌱 AI Smart Agriculture Assistant")
+    gr.Markdown("Upload a crop image to detect diseases and get AI farming advice in English & Urdu.")
+    
+    with gr.Row():
+        with gr.Column():
+            input_img = gr.Image(type="numpy", label="Upload Crop Image")
+            conf_slider = gr.Slider(minimum=0.1, maximum=1.0, value=0.25, label="Confidence Threshold")
+            btn = gr.Button("Analyze Plant", variant="primary")
+        
+        with gr.Column():
+            output_img = gr.Image(label="Detection Result")
+            output_text = gr.Markdown(label="AI Advice")
+
+    btn.click(fn=predict_and_advise, inputs=[input_img, conf_slider], outputs=[output_img, output_text])
+    
+    gr.Markdown("---")
+    gr.Markdown("👨‍💻 Developed by Muhammad Aman")
+
+demo.launch()
