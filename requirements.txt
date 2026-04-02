@@ -1,7 +1,6 @@
-streamlit
+gradio
 ultralytics
-opencv-python
+opencv-python-headless
 pillow
 numpy
 groq
-opencv-python-headless
